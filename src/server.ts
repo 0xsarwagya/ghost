@@ -17,5 +17,13 @@ export { GhostError, isGhostError } from "./errors.js";
 export type { GhostErrorCode, GhostOperation } from "./errors.js";
 export { canonicalChallengeBytes } from "./protocol/challenge.js";
 export type { GhostChallenge } from "./protocol/challenge.js";
-export { deriveGhostId, isGhostId, parseGhostId } from "./protocol/identity.js";
+export {
+  deriveCredentialId,
+  deriveGhostId,
+  deriveRecoveryAuthorityId,
+  isCredentialId,
+  isGhostId,
+  parseGhostId,
+} from "./protocol/identity.js";
+export type { GhostRecoveryRecord } from "./protocol/identity.js";
 export type { GhostProof } from "./protocol/proof.js";

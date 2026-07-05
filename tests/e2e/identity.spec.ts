@@ -38,6 +38,10 @@ declare global {
       recoverySecret: string,
       recoveryRecord: Awaited<ReturnType<Window["__enableRecovery"]>>["recoveryRecord"],
     ) => Promise<{ id: string; credentialId: string; publicKey: string }>;
+    __recoverError: (
+      recoverySecret: string,
+      recoveryRecord: Awaited<ReturnType<Window["__enableRecovery"]>>["recoveryRecord"],
+    ) => Promise<string | null>;
     __sign: (challenge: unknown) => Promise<unknown>;
     __signError: (challenge: unknown) => Promise<string | null>;
     __reset: () => Promise<boolean>;
@@ -205,5 +209,30 @@ test.describe("ghost identity persistence", () => {
       credentialStore: credentials,
     });
     expect(result.ok).toBe(true);
+  });
+
+  test("recovering a different ghost never clobbers the local identity", async ({
+    page,
+  }) => {
+    await open(page);
+    const existing = await page.evaluate(() => window.__create());
+    const recovery = await page.evaluate(() => window.__enableRecovery());
+
+    // A valid secret for a *different* ghost must not destroy this
+    // browser's non-extractable key.
+    const foreignRecord = {
+      ...recovery.recoveryRecord,
+      ghostId: `ghost_1_${"a".repeat(32)}` as const,
+    };
+    const code = await page.evaluate(
+      ({ recoverySecret, recoveryRecord }) =>
+        window.__recoverError(recoverySecret, recoveryRecord),
+      { recoverySecret: recovery.recoverySecret, recoveryRecord: foreignRecord },
+    );
+    expect(code).toBe("RECOVERY_FAILED");
+
+    const after = await page.evaluate(() => window.__create());
+    expect(after.id).toBe(existing.id);
+    expect(after.credentialId).toBe(existing.credentialId);
   });
 });

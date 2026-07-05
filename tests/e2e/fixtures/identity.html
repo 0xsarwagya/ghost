@@ -44,6 +44,15 @@
         };
       };
 
+      window.__recoverError = async (recoverySecret, recoveryRecord) => {
+        try {
+          await recoverGhost({ recoverySecret, recoveryRecord });
+          return null;
+        } catch (error) {
+          return isGhostError(error) ? error.code : String(error);
+        }
+      };
+
       window.__signError = async (challenge) => {
         const ghost = await createGhost();
         try {

@@ -40,7 +40,12 @@ export interface Ghost {
   readonly publicKey: string;
   /** The configured recovery method, when this Ghost has opted in. */
   readonly recovery?: GhostRecoveryRecord;
-  /** Creates a user-held recovery secret and an app-storable recovery record. */
+  /**
+   * Creates a user-held recovery secret and an app-storable recovery record.
+   * Calling it again mints a fresh secret and record; a record your app
+   * stored earlier keeps verifying against its own secret until your app
+   * replaces it — rotation is the application's storage decision.
+   */
   enableRecovery(): Promise<GhostRecoverySetup>;
   /** Signs a server-issued challenge and returns the proof envelope. */
   sign(challenge: GhostChallenge): Promise<GhostProof>;
@@ -199,6 +204,23 @@ export async function recoverGhost(input: RecoverGhostInput): Promise<Ghost> {
       message: "recovery secret does not match this Ghost",
       operation: "recoverGhost",
     });
+  }
+
+  // Never clobber a different identity's non-extractable key — that would
+  // destroy it permanently. The app must reset() deliberately first.
+  const existing = await loadIdentity("recoverGhost");
+  if (existing !== undefined && isIdentityRecord(existing)) {
+    const existingGhostId =
+      existing.ghostId ??
+      (await deriveGhostId(new Uint8Array(existing.publicKeyRaw), cryptoApi.subtle));
+    if (existingGhostId !== input.recoveryRecord.ghostId) {
+      throw new GhostError({
+        code: "RECOVERY_FAILED",
+        message:
+          "a different Ghost identity already exists in this browser — reset() it before recovering another",
+        operation: "recoverGhost",
+      });
+    }
   }
 
   const credential = await generateCredential(cryptoApi, "recoverGhost");

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isGhostError } from "../src/errors.js";
 import { encodeBase64Url } from "../src/protocol/encoding.js";
+import { createRecoverySecret } from "../src/protocol/identity.js";
 import type { GhostProof } from "../src/protocol/proof.js";
 import { createChallenge } from "../src/server/challenge.js";
 import { InMemoryChallengeStore } from "../src/server/store.js";
@@ -253,5 +254,28 @@ describe("InMemoryChallengeStore", () => {
     expect(store.size).toBe(2); // "a" swept, "b" and "c" remain
     // A swept nonce could in principle be consumed again — that is fine,
     // because expired challenges never reach the store.
+  });
+});
+
+describe("server-side recovery verification", () => {
+  it("exposes deriveRecoveryAuthorityId from the server entry", async () => {
+    const server = await import("../src/server.js");
+    const secret = createRecoverySecret(globalThis.crypto);
+    const authorityId = await server.deriveRecoveryAuthorityId(secret);
+    expect(authorityId).toMatch(/^recauth_1_[a-z2-7]{32}$/);
+    // Deterministic: the browser-side setup and the server check agree.
+    expect(await server.deriveRecoveryAuthorityId(secret)).toBe(authorityId);
+    // A different secret never matches.
+    const other = createRecoverySecret(globalThis.crypto);
+    expect(await server.deriveRecoveryAuthorityId(other)).not.toBe(authorityId);
+  });
+
+  it("rejects malformed recovery secrets with RECOVERY_FAILED", async () => {
+    const server = await import("../src/server.js");
+    for (const bad of ["", "wrong_prefix_abc", "ghost_recovery_1_@@@", "ghost_recovery_1_dG9vc2hvcnQ"]) {
+      await expect(server.deriveRecoveryAuthorityId(bad)).rejects.toSatisfy(
+        (error: unknown) => isGhostError(error) && error.code === "RECOVERY_FAILED",
+      );
+    }
   });
 });
