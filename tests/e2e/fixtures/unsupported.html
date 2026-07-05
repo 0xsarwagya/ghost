@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost unsupported runtime fixture</title>
+    <script>
+      // Break the runtime BEFORE the library loads.
+      //   ?mode=nocrypto — no Web Crypto at all
+      //   ?mode=keygen   — crypto exists but key generation fails
+      const mode = new URLSearchParams(location.search).get("mode") ?? "nocrypto";
+      if (mode === "nocrypto") {
+        Object.defineProperty(window, "crypto", { value: undefined });
+      } else {
+        crypto.subtle.generateKey = () => {
+          throw new DOMException("stubbed out", "NotSupportedError");
+        };
+      }
+    </script>
+  </head>
+  <body>
+    <pre id="log"></pre>
+    <script type="module">
+      import { capabilities, createGhost, isGhostError } from "@0xsarwagya/ghost";
+
+      const result = { supported: null, code: null };
+      try {
+        const caps = await capabilities();
+        result.supported = caps.supported;
+        await createGhost();
+      } catch (error) {
+        result.code = isGhostError(error) ? error.code : String(error);
+      }
+      window.__result = result;
+      window.__done = true;
+    </script>
+  </body>
+</html>

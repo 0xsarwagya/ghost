@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost identity fixture</title>
+  </head>
+  <body>
+    <pre id="log"></pre>
+    <script type="module">
+      import { capabilities, createGhost, isGhostError } from "@0xsarwagya/ghost";
+
+      window.__capabilities = () => capabilities();
+
+      window.__create = async () => {
+        const ghost = await createGhost();
+        return { id: ghost.id, publicKey: ghost.publicKey };
+      };
+
+      window.__sign = async (challenge) => {
+        const ghost = await createGhost();
+        return ghost.sign(challenge);
+      };
+
+      window.__signError = async (challenge) => {
+        const ghost = await createGhost();
+        try {
+          await ghost.sign(challenge);
+          return null;
+        } catch (error) {
+          return isGhostError(error) ? error.code : String(error);
+        }
+      };
+
+      window.__reset = async () => {
+        const ghost = await createGhost();
+        await ghost.reset();
+        return true;
+      };
+
+      window.__ready = true;
+    </script>
+  </body>
+</html>

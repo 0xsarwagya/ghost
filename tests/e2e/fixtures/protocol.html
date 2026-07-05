@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost protocol vectors fixture</title>
+  </head>
+  <body>
+    <pre id="log"></pre>
+    <script type="module">
+      import { runVectorChecks } from "@vectors";
+
+      window.__runVectors = () => runVectorChecks(crypto.subtle);
+      window.__ready = true;
+    </script>
+  </body>
+</html>
