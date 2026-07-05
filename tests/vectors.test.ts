@@ -11,6 +11,6 @@ describe("protocol v1 test vectors (Node)", () => {
       );
     }
     expect(report.pass).toBe(true);
-    expect(report.checks).toHaveLength(7);
+    expect(report.checks).toHaveLength(8);
   });
 });

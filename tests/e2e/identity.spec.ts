@@ -2,7 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { GHOST_ID_PATTERN } from "../../src/protocol/constants.js";
 import { createChallenge } from "../../src/server/challenge.js";
-import { InMemoryChallengeStore } from "../../src/server/store.js";
+import {
+  InMemoryChallengeStore,
+  InMemoryGhostCredentialStore,
+} from "../../src/server/store.js";
 import { verifyGhostProof } from "../../src/server/verify.js";
 
 /**
@@ -20,7 +23,21 @@ declare global {
   interface Window {
     __ready?: boolean;
     __capabilities: () => Promise<{ supported: boolean }>;
-    __create: () => Promise<{ id: string; publicKey: string }>;
+    __create: () => Promise<{ id: string; credentialId: string; publicKey: string }>;
+    __enableRecovery: () => Promise<{
+      recoverySecret: string;
+      recoveryRecord: {
+        version: 1;
+        method: "recovery-secret";
+        ghostId: string;
+        authorityId: string;
+        createdAt: number;
+      };
+    }>;
+    __recover: (
+      recoverySecret: string,
+      recoveryRecord: Awaited<ReturnType<Window["__enableRecovery"]>>["recoveryRecord"],
+    ) => Promise<{ id: string; credentialId: string; publicKey: string }>;
     __sign: (challenge: unknown) => Promise<unknown>;
     __signError: (challenge: unknown) => Promise<string | null>;
     __reset: () => Promise<boolean>;
@@ -55,10 +72,13 @@ test.describe("ghost identity persistence", () => {
     await page.waitForFunction(() => window.__ready === true);
     const second = await page.evaluate(() => window.__create());
     expect(second.id).toBe(first.id);
+    expect(second.credentialId).toBe(first.credentialId);
     expect(second.publicKey).toBe(first.publicKey);
 
     // Browser signs, Node verifies — the real trust boundary.
     const store = new InMemoryChallengeStore();
+    const credentials = new InMemoryGhostCredentialStore();
+    credentials.register(first);
     const challenge = createChallenge({ audience: AUDIENCE, action: "login" });
     const proof = await page.evaluate(
       (c) => window.__sign(c),
@@ -68,10 +88,12 @@ test.describe("ghost identity persistence", () => {
       expectedAudience: AUDIENCE,
       expectedAction: "login",
       challengeStore: store,
+      credentialStore: credentials,
     });
     expect(result).toEqual({
       ok: true,
       ghostId: first.id,
+      credentialId: first.credentialId,
       publicKey: first.publicKey,
       action: "login",
     });
@@ -80,6 +102,7 @@ test.describe("ghost identity persistence", () => {
     const replay = await verifyGhostProof(proof, {
       expectedAudience: AUDIENCE,
       challengeStore: store,
+      credentialStore: credentials,
     });
     expect(replay.ok).toBe(false);
     if (!replay.ok) {
@@ -89,7 +112,7 @@ test.describe("ghost identity persistence", () => {
 
   test("identity-bound challenges only sign for their ghost", async ({ page }) => {
     await open(page);
-    const { id } = await page.evaluate(() => window.__create());
+    const ghost = await page.evaluate(() => window.__create());
 
     const foreign = createChallenge({
       audience: AUDIENCE,
@@ -100,12 +123,15 @@ test.describe("ghost identity persistence", () => {
       "INVALID_CHALLENGE",
     );
 
-    const own = createChallenge({ audience: AUDIENCE, action: "login", ghostId: id });
+    const own = createChallenge({ audience: AUDIENCE, action: "login", ghostId: ghost.id });
     const proof = await page.evaluate((c) => window.__sign(c), own as unknown);
+    const credentials = new InMemoryGhostCredentialStore();
+    credentials.register(ghost);
     const result = await verifyGhostProof(proof, {
       expectedAudience: AUDIENCE,
-      expectedGhostId: id,
+      expectedGhostId: ghost.id,
       challengeStore: new InMemoryChallengeStore(),
+      credentialStore: credentials,
     });
     expect(result.ok).toBe(true);
   });
@@ -134,5 +160,50 @@ test.describe("ghost identity persistence", () => {
     const after = await page.evaluate(() => window.__create());
     expect(after.id).toMatch(GHOST_ID_PATTERN);
     expect(after.id).not.toBe(before.id);
+  });
+
+  test("recovery keeps the ghost ID while rotating the credential", async ({
+    page,
+  }) => {
+    await open(page);
+    const before = await page.evaluate(() => window.__create());
+    const recovery = await page.evaluate(() => window.__enableRecovery());
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase("ghost");
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+          request.onblocked = () => reject(new Error("deleteDatabase blocked"));
+        }),
+    );
+    await page.reload();
+    await page.waitForFunction(() => window.__ready === true);
+
+    const recovered = await page.evaluate(
+      ({ recoverySecret, recoveryRecord }) =>
+        window.__recover(recoverySecret, recoveryRecord),
+      recovery,
+    );
+    expect(recovered.id).toBe(before.id);
+    expect(recovered.credentialId).not.toBe(before.credentialId);
+    expect(recovered.publicKey).not.toBe(before.publicKey);
+
+    const credentials = new InMemoryGhostCredentialStore();
+    credentials.register(recovered);
+    const challenge = createChallenge({
+      audience: AUDIENCE,
+      action: "login",
+      ghostId: recovered.id,
+    });
+    const proof = await page.evaluate((c) => window.__sign(c), challenge as unknown);
+    const result = await verifyGhostProof(proof, {
+      expectedAudience: AUDIENCE,
+      expectedGhostId: recovered.id,
+      challengeStore: new InMemoryChallengeStore(),
+      credentialStore: credentials,
+    });
+    expect(result.ok).toBe(true);
   });
 });

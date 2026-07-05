@@ -10,7 +10,10 @@ scope here, forever.
 The whole v1 protocol, proven across engines:
 
 - Non-extractable Ed25519 keypair, persisted in IndexedDB, origin-bound.
-- Versioned identity format (`ghost_1_…`) derived from the public key.
+- Stable identity format (`ghost_1_…`) above active credentials
+  (`cred_1_…`), so a Ghost can rotate keys without changing identity.
+- Optional recovery secret that creates a fresh local credential for the
+  same Ghost ID without email, OAuth, or a Ghost-hosted account.
 - Challenge → sign → verify with replay, expiry, audience, action, and
   identity-binding enforcement.
 - Server verifier that runs anywhere `globalThis.crypto` exists.
@@ -44,8 +47,8 @@ application outgrows challenges.
   makes Ghost an account system.
 - Key export. A non-extractable key that becomes extractable on request is
   neither.
-- Cross-device sync or recovery. If the browser loses the key, the identity
-  is gone — that is the fundamental tradeoff, not a bug backlog item.
+- Cross-device sync. Recovery is user-held and opt-in; Ghost still does not
+  silently sync identity through a hosted service.
 - A hosted Ghost service. There is no server to run; that absence is the
   product.
 - DIDs, blockchains, zero-knowledge proofs.

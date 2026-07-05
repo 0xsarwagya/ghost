@@ -16,7 +16,7 @@ import {
   canonicalChallengeBytes,
   type GhostChallenge,
 } from "../src/protocol/challenge.js";
-import { deriveGhostId } from "../src/protocol/identity.js";
+import { deriveCredentialId, deriveGhostId } from "../src/protocol/identity.js";
 
 export const FIXTURE_PRIVATE_KEY_PKCS8_HEX =
   "302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
@@ -28,6 +28,8 @@ export const FIXTURE_PUBLIC_KEY_BASE64URL =
   "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
 
 export const FIXTURE_GHOST_ID = "ghost_1_crhgcniramqtgfpib5uiaautocwdigbt";
+
+export const FIXTURE_CREDENTIAL_ID = "cred_1_3dveqtnobb556nsxhfyhh6qbn5lhsseb";
 
 /** expiresAt is 2100-01-01T00:00:00Z — the fixtures never expire in tests. */
 export const UNBOUND_CHALLENGE: GhostChallenge = {
@@ -100,6 +102,11 @@ export async function runVectorChecks(subtle: SubtleCrypto): Promise<VectorRepor
 
   const publicKeyRaw = hexToBytes(FIXTURE_PUBLIC_KEY_RAW_HEX);
   record("ghost id", await deriveGhostId(publicKeyRaw, subtle), FIXTURE_GHOST_ID);
+  record(
+    "credential id",
+    await deriveCredentialId(publicKeyRaw, subtle),
+    FIXTURE_CREDENTIAL_ID,
+  );
 
   const privateKey = await subtle.importKey(
     "pkcs8",

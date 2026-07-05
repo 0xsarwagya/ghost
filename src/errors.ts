@@ -4,6 +4,7 @@ export type GhostErrorCode =
   | "KEY_GENERATION_FAILED"
   | "KEY_NOT_FOUND"
   | "IDENTITY_CORRUPTED"
+  | "RECOVERY_FAILED"
   | "SIGNING_FAILED"
   | "INVALID_CHALLENGE"
   | "CHALLENGE_EXPIRED"
@@ -14,6 +15,8 @@ export type GhostErrorCode =
 
 export type GhostOperation =
   | "createGhost"
+  | "enableRecovery"
+  | "recoverGhost"
   | "capabilities"
   | "sign"
   | "reset"

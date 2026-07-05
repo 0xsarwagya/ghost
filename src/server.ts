@@ -1,7 +1,15 @@
 export { createChallenge } from "./server/challenge.js";
 export type { CreateChallengeInput } from "./server/challenge.js";
-export { InMemoryChallengeStore } from "./server/store.js";
-export type { ChallengeStore } from "./server/store.js";
+export {
+  InMemoryChallengeStore,
+  InMemoryGhostCredentialStore,
+} from "./server/store.js";
+export type {
+  ChallengeStore,
+  BrowserGhostCredential,
+  GhostCredential,
+  GhostCredentialStore,
+} from "./server/store.js";
 export { verifyGhostProof } from "./server/verify.js";
 export type { GhostVerification, VerifyGhostProofOptions } from "./server/verify.js";
 

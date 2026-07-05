@@ -2,9 +2,9 @@ import { GhostError, isGhostError, type GhostErrorCode } from "../errors.js";
 import { canonicalChallengeBytes } from "../protocol/challenge.js";
 import { PUBLIC_KEY_BYTES, SIGNATURE_BYTES } from "../protocol/constants.js";
 import { decodeBase64Url } from "../protocol/encoding.js";
-import { deriveGhostId } from "../protocol/identity.js";
+import { deriveCredentialId, deriveGhostId } from "../protocol/identity.js";
 import { assertProofShape } from "../protocol/proof.js";
-import type { ChallengeStore } from "./store.js";
+import type { ChallengeStore, GhostCredentialStore } from "./store.js";
 
 export interface VerifyGhostProofOptions {
   /** The audience value this server issues challenges for. */
@@ -15,12 +15,23 @@ export interface VerifyGhostProofOptions {
   expectedAction?: string;
   /** Require the proof to come from this exact identity. */
   expectedGhostId?: string;
+  /**
+   * Registry of credentials authorized for stable Ghost IDs. Required for
+   * recoverable identities whose ghost ID is not derived from the public key.
+   */
+  credentialStore?: GhostCredentialStore;
   now?: () => number;
   crypto?: Crypto;
 }
 
 export type GhostVerification =
-  | { ok: true; ghostId: string; publicKey: string; action: string }
+  | {
+      ok: true;
+      ghostId: string;
+      credentialId: string;
+      publicKey: string;
+      action: string;
+    }
   | { ok: false; code: GhostErrorCode; message: string };
 
 function reject(code: GhostErrorCode, message: string): GhostVerification {
@@ -118,10 +129,27 @@ export async function verifyGhostProof(
     return reject("INVALID_SIGNATURE", "signature has the wrong length");
   }
 
-  // The ghost ID is a claim; the public key is the evidence. Recompute.
-  const derivedId = await deriveGhostId(publicKeyRaw, cryptoApi.subtle);
-  if (derivedId !== proof.ghostId) {
-    return reject("INVALID_SIGNATURE", "ghost ID does not match the public key");
+  const derivedCredentialId = await deriveCredentialId(publicKeyRaw, cryptoApi.subtle);
+  if (derivedCredentialId !== proof.credentialId) {
+    return reject("INVALID_SIGNATURE", "credential ID does not match the public key");
+  }
+
+  const legacyKeyDerivedGhostId = await deriveGhostId(publicKeyRaw, cryptoApi.subtle);
+  if (legacyKeyDerivedGhostId !== proof.ghostId) {
+    if (options.credentialStore === undefined) {
+      return reject(
+        "INVALID_SIGNATURE",
+        "stable ghost ID requires a registered active credential",
+      );
+    }
+    const credentialActive = await options.credentialStore.isCredentialActive(
+      proof.ghostId,
+      proof.credentialId,
+      proof.publicKey,
+    );
+    if (!credentialActive) {
+      return reject("INVALID_SIGNATURE", "credential is not active for this ghost");
+    }
   }
 
   let verified: boolean;
@@ -157,6 +185,7 @@ export async function verifyGhostProof(
   return {
     ok: true,
     ghostId: proof.ghostId,
+    credentialId: proof.credentialId,
     publicKey: proof.publicKey,
     action: challenge.action,
   };

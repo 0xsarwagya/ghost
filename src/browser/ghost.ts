@@ -6,11 +6,22 @@ import {
 } from "../protocol/challenge.js";
 import { ALGORITHM, PROTOCOL_VERSION } from "../protocol/constants.js";
 import { encodeBase64Url } from "../protocol/encoding.js";
-import { deriveGhostId } from "../protocol/identity.js";
+import {
+  assertRecoveryRecord,
+  createGhostId,
+  createRecoverySecret,
+  deriveCredentialId,
+  deriveGhostId,
+  deriveRecoveryAuthorityId,
+  isGhostId,
+  type GhostRecoveryRecord,
+  type GhostRecoverySetup,
+} from "../protocol/identity.js";
 import type { GhostProof } from "../protocol/proof.js";
 import {
   deleteIdentity,
   loadIdentity,
+  saveIdentity,
   saveIdentityIfAbsent,
   type IdentityRecord,
 } from "./storage.js";
@@ -23,8 +34,14 @@ export interface CreateGhostOptions {
 export interface Ghost {
   /** The public identifier — ghost_1_… */
   readonly id: string;
+  /** Identifier for the active browser-held credential. */
+  readonly credentialId: string;
   /** base64url of the raw public key. */
   readonly publicKey: string;
+  /** The configured recovery method, when this Ghost has opted in. */
+  readonly recovery?: GhostRecoveryRecord;
+  /** Creates a user-held recovery secret and an app-storable recovery record. */
+  enableRecovery(): Promise<GhostRecoverySetup>;
   /** Signs a server-issued challenge and returns the proof envelope. */
   sign(challenge: GhostChallenge): Promise<GhostProof>;
   /**
@@ -33,6 +50,13 @@ export interface Ghost {
    * inaccessible; the next createGhost() produces a new one.
    */
   reset(): Promise<void>;
+}
+
+export interface RecoverGhostInput {
+  recoverySecret: string;
+  recoveryRecord: GhostRecoveryRecord;
+  /** Injectable for tests. Defaults to globalThis.crypto. */
+  crypto?: Crypto;
 }
 
 function isIdentityRecord(value: unknown): value is IdentityRecord {
@@ -47,8 +71,54 @@ function isIdentityRecord(value: unknown): value is IdentityRecord {
     record.privateKey instanceof CryptoKey &&
     record.privateKey.type === "private" &&
     record.publicKeyRaw instanceof ArrayBuffer &&
-    typeof record.createdAt === "number"
+    typeof record.createdAt === "number" &&
+    (record.ghostId === undefined ||
+      (typeof record.ghostId === "string" && isGhostId(record.ghostId))) &&
+    (record.credentialId === undefined || typeof record.credentialId === "string")
   );
+}
+
+async function completeRecord(
+  record: IdentityRecord,
+  cryptoApi: Crypto,
+  operation: "createGhost" | "recoverGhost",
+): Promise<IdentityRecord> {
+  const publicKeyRaw = new Uint8Array(record.publicKeyRaw);
+  const ghostId = record.ghostId ?? (await deriveGhostId(publicKeyRaw, cryptoApi.subtle));
+  const credentialId =
+    record.credentialId ?? (await deriveCredentialId(publicKeyRaw, cryptoApi.subtle));
+  const completed = { ...record, ghostId, credentialId };
+  if (record.ghostId === undefined || record.credentialId === undefined) {
+    await saveIdentity(completed, operation);
+  }
+  return completed;
+}
+
+async function generateCredential(
+  cryptoApi: Crypto,
+  operation: "createGhost" | "recoverGhost",
+): Promise<{ privateKey: CryptoKey; publicKeyRaw: ArrayBuffer; credentialId: string }> {
+  let keyPair: CryptoKeyPair;
+  let publicKeyRaw: ArrayBuffer;
+  try {
+    keyPair = (await cryptoApi.subtle.generateKey("Ed25519", false, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    publicKeyRaw = await cryptoApi.subtle.exportKey("raw", keyPair.publicKey);
+  } catch (error) {
+    throw new GhostError({
+      code: "KEY_GENERATION_FAILED",
+      message: "the runtime failed to generate an Ed25519 keypair",
+      operation,
+      cause: error,
+    });
+  }
+  return {
+    privateKey: keyPair.privateKey,
+    publicKeyRaw,
+    credentialId: await deriveCredentialId(new Uint8Array(publicKeyRaw), cryptoApi.subtle),
+  };
 }
 
 async function loadOrCreateRecord(cryptoApi: Crypto): Promise<IdentityRecord> {
@@ -62,32 +132,21 @@ async function loadOrCreateRecord(cryptoApi: Crypto): Promise<IdentityRecord> {
         operation: "createGhost",
       });
     }
-    return existing;
+    return completeRecord(existing, cryptoApi, "createGhost");
   }
 
-  let keyPair: CryptoKeyPair;
-  let publicKeyRaw: ArrayBuffer;
-  try {
-    keyPair = (await cryptoApi.subtle.generateKey("Ed25519", false, [
-      "sign",
-      "verify",
-    ])) as CryptoKeyPair;
-    publicKeyRaw = await cryptoApi.subtle.exportKey("raw", keyPair.publicKey);
-  } catch (error) {
-    throw new GhostError({
-      code: "KEY_GENERATION_FAILED",
-      message: "the runtime failed to generate an Ed25519 keypair",
-      operation: "createGhost",
-      cause: error,
-    });
-  }
+  const identityMaterial = new Uint8Array(32);
+  cryptoApi.getRandomValues(identityMaterial);
+  const credential = await generateCredential(cryptoApi, "createGhost");
 
   const fresh: IdentityRecord = {
     id: "default",
     version: PROTOCOL_VERSION,
     algorithm: ALGORITHM,
-    privateKey: keyPair.privateKey,
-    publicKeyRaw,
+    ghostId: await createGhostId(identityMaterial, cryptoApi.subtle),
+    credentialId: credential.credentialId,
+    privateKey: credential.privateKey,
+    publicKeyRaw: credential.publicKeyRaw,
     createdAt: Date.now(),
   };
   const winner = await saveIdentityIfAbsent(fresh, "createGhost");
@@ -99,7 +158,7 @@ async function loadOrCreateRecord(cryptoApi: Crypto): Promise<IdentityRecord> {
       operation: "createGhost",
     });
   }
-  return winner;
+  return completeRecord(winner, cryptoApi, "createGhost");
 }
 
 let inFlight: Promise<Ghost> | undefined;
@@ -120,6 +179,44 @@ export function createGhost(options: CreateGhostOptions = {}): Promise<Ghost> {
   return pending;
 }
 
+export async function recoverGhost(input: RecoverGhostInput): Promise<Ghost> {
+  const cryptoApi = input.crypto ?? globalThis.crypto;
+  if (cryptoApi?.subtle === undefined) {
+    throw new GhostError({
+      code: "UNSUPPORTED",
+      message: "Web Crypto (crypto.subtle) is not available in this runtime.",
+      operation: "recoverGhost",
+    });
+  }
+  assertRecoveryRecord(input.recoveryRecord, "recoverGhost");
+  const authorityId = await deriveRecoveryAuthorityId(
+    input.recoverySecret,
+    cryptoApi.subtle,
+  );
+  if (authorityId !== input.recoveryRecord.authorityId) {
+    throw new GhostError({
+      code: "RECOVERY_FAILED",
+      message: "recovery secret does not match this Ghost",
+      operation: "recoverGhost",
+    });
+  }
+
+  const credential = await generateCredential(cryptoApi, "recoverGhost");
+  const recovered: IdentityRecord = {
+    id: "default",
+    version: PROTOCOL_VERSION,
+    algorithm: ALGORITHM,
+    ghostId: input.recoveryRecord.ghostId,
+    credentialId: credential.credentialId,
+    privateKey: credential.privateKey,
+    publicKeyRaw: credential.publicKeyRaw,
+    createdAt: Date.now(),
+    recovery: { ...input.recoveryRecord },
+  };
+  await saveIdentity(recovered, "recoverGhost");
+  return instantiate({ crypto: cryptoApi });
+}
+
 async function instantiate(options: CreateGhostOptions): Promise<Ghost> {
   const cryptoApi = options.crypto ?? globalThis.crypto;
   if (cryptoApi?.subtle === undefined) {
@@ -132,13 +229,45 @@ async function instantiate(options: CreateGhostOptions): Promise<Ghost> {
 
   const record = await loadOrCreateRecord(cryptoApi);
   const publicKeyRaw = new Uint8Array(record.publicKeyRaw);
-  const id = await deriveGhostId(publicKeyRaw, cryptoApi.subtle);
+  const id = record.ghostId;
+  const credentialId = record.credentialId;
+  if (id === undefined || credentialId === undefined) {
+    throw new GhostError({
+      code: "IDENTITY_CORRUPTED",
+      message: "the stored identity record is missing identity metadata",
+      operation: "createGhost",
+    });
+  }
   const publicKey = encodeBase64Url(publicKeyRaw);
   let destroyed = false;
 
   return {
     id,
+    credentialId,
     publicKey,
+    ...(record.recovery !== undefined ? { recovery: record.recovery } : {}),
+    async enableRecovery(): Promise<GhostRecoverySetup> {
+      if (destroyed) {
+        throw new GhostError({
+          code: "KEY_NOT_FOUND",
+          message: "this identity has been reset",
+          operation: "enableRecovery",
+        });
+      }
+      const recoverySecret = createRecoverySecret(cryptoApi);
+      const recoveryRecord: GhostRecoveryRecord = {
+        version: PROTOCOL_VERSION,
+        method: "recovery-secret",
+        ghostId: id,
+        authorityId: await deriveRecoveryAuthorityId(
+          recoverySecret,
+          cryptoApi.subtle,
+        ),
+        createdAt: Date.now(),
+      };
+      await saveIdentity({ ...record, recovery: recoveryRecord }, "enableRecovery");
+      return { recoverySecret, recoveryRecord };
+    },
     async sign(challenge: GhostChallenge): Promise<GhostProof> {
       if (destroyed) {
         throw new GhostError({
@@ -181,6 +310,7 @@ async function instantiate(options: CreateGhostOptions): Promise<Ghost> {
         version: PROTOCOL_VERSION,
         algorithm: ALGORITHM,
         ghostId: id,
+        credentialId,
         publicKey,
         challenge: { ...challenge },
         signature: encodeBase64Url(new Uint8Array(signature)),

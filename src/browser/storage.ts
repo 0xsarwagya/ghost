@@ -1,4 +1,5 @@
 import { GhostError, type GhostOperation } from "../errors.js";
+import type { GhostRecoveryRecord } from "../protocol/identity.js";
 
 const DB_NAME = "ghost";
 const STORE_NAME = "identities";
@@ -14,9 +15,12 @@ export interface IdentityRecord {
   id: typeof RECORD_KEY;
   version: 1;
   algorithm: "ed25519";
+  ghostId?: string;
+  credentialId?: string;
   privateKey: CryptoKey;
   publicKeyRaw: ArrayBuffer;
   createdAt: number;
+  recovery?: GhostRecoveryRecord;
 }
 
 function storageError(operation: GhostOperation, cause: unknown): GhostError {
@@ -91,6 +95,25 @@ export async function saveIdentityIfAbsent(
         put.onerror = () => reject(storageError(operation, put.error));
       };
       existing.onerror = () => reject(storageError(operation, existing.error));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function saveIdentity(
+  record: IdentityRecord,
+  operation: GhostOperation,
+): Promise<void> {
+  const db = await openDb(operation);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const request = db
+        .transaction(STORE_NAME, "readwrite")
+        .objectStore(STORE_NAME)
+        .put(record);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(storageError(operation, request.error));
     });
   } finally {
     db.close();

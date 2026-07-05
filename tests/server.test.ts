@@ -9,6 +9,7 @@ import { verifyGhostProof, type VerifyGhostProofOptions } from "../src/server/ve
 import {
   BOUND_CHALLENGE,
   BOUND_SIGNATURE_HEX,
+  FIXTURE_CREDENTIAL_ID,
   FIXTURE_GHOST_ID,
   FIXTURE_PUBLIC_KEY_BASE64URL,
   hexToBytes,
@@ -23,6 +24,7 @@ function validProof(): GhostProof {
     version: 1,
     algorithm: "ed25519",
     ghostId: FIXTURE_GHOST_ID,
+    credentialId: FIXTURE_CREDENTIAL_ID,
     publicKey: FIXTURE_PUBLIC_KEY_BASE64URL,
     challenge: { ...UNBOUND_CHALLENGE },
     signature: encodeBase64Url(hexToBytes(UNBOUND_SIGNATURE_HEX)),
@@ -57,6 +59,7 @@ describe("verifyGhostProof", () => {
     expect(result).toEqual({
       ok: true,
       ghostId: FIXTURE_GHOST_ID,
+      credentialId: FIXTURE_CREDENTIAL_ID,
       publicKey: FIXTURE_PUBLIC_KEY_BASE64URL,
       action: "login",
     });
@@ -139,9 +142,15 @@ describe("verifyGhostProof", () => {
     await expectRejection(proof, "INVALID_CHALLENGE");
   });
 
-  it("rejects a ghost ID that does not match the public key", async () => {
+  it("rejects a ghost ID that does not match the public key without a registry", async () => {
     const proof = validProof();
     proof.ghostId = `ghost_1_${"a".repeat(32)}`;
+    await expectRejection(proof, "INVALID_SIGNATURE");
+  });
+
+  it("rejects a credential ID that does not match the public key", async () => {
+    const proof = validProof();
+    proof.credentialId = `cred_1_${"a".repeat(32)}`;
     await expectRejection(proof, "INVALID_SIGNATURE");
   });
 

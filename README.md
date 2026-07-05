@@ -4,7 +4,8 @@ Persistent cryptographic identity for web apps without accounts.
 
 A TypeScript library that gives a browser a keypair instead of giving your
 application a user database. The private key never leaves the browser. The
-public key becomes the identity. Your server verifies signatures.
+browser gets a stable Ghost ID, and the active public key becomes a
+credential for that Ghost. Your server verifies signatures.
 
 Ghost authenticates a key, not a person.
 
@@ -23,6 +24,7 @@ import { createGhost } from "@0xsarwagya/ghost";
 
 const ghost = await createGhost();
 console.log(ghost.id); // ghost_1_crhgcniramqtgfpib5uiaautocwdigbt
+console.log(ghost.credentialId); // cred_1_…
 
 // Later, prove possession of a server-issued challenge:
 const proof = await ghost.sign(challenge);
@@ -34,10 +36,13 @@ On your server:
 import {
   createChallenge,
   InMemoryChallengeStore,
+  InMemoryGhostCredentialStore,
   verifyGhostProof,
 } from "@0xsarwagya/ghost/server";
 
 const store = new InMemoryChallengeStore();
+const credentials = new InMemoryGhostCredentialStore();
+credentials.register(ghost); // persist this in your own database in production
 
 // 1. Issue a one-time challenge.
 const challenge = createChallenge({ audience: "https://app.example", action: "login" });
@@ -46,6 +51,7 @@ const challenge = createChallenge({ audience: "https://app.example", action: "lo
 const result = await verifyGhostProof(proof, {
   expectedAudience: "https://app.example",
   challengeStore: store,
+  credentialStore: credentials,
 });
 
 if (result.ok) {
@@ -54,6 +60,26 @@ if (result.ok) {
 ```
 
 No email. No password. No OAuth. No user table.
+
+## Optional recovery
+
+Ghost is usable without recovery. When a Ghost owns durable value, ask the
+user whether to make it recoverable:
+
+```ts
+const { recoverySecret, recoveryRecord } = await ghost.enableRecovery();
+// Show recoverySecret once. Store recoveryRecord with your app's Ghost row.
+```
+
+If the browser profile is lost, the user supplies the secret and your app
+supplies the recovery record:
+
+```ts
+import { recoverGhost } from "@0xsarwagya/ghost";
+
+const ghost = await recoverGhost({ recoverySecret, recoveryRecord });
+// Same ghost.id, fresh non-extractable credential.
+```
 
 ## Status
 

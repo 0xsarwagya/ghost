@@ -1,0 +1,42 @@
+---
+title: "Recovery"
+description: "Opt-in Ghost recovery without accounts."
+order: 3
+---
+
+Ghost is still zero-setup. `createGhost()` works without email, password,
+OAuth, or recovery.
+
+Recovery is for the moment when your application lets a Ghost own something
+durable. Ask then:
+
+> Want to make this Ghost recoverable?
+
+## Enable recovery
+
+```ts
+const { recoverySecret, recoveryRecord } = await ghost.enableRecovery();
+```
+
+Show `recoverySecret` once and ask the user to save it outside the
+browser. Store `recoveryRecord` next to your app's Ghost row. The record is
+not secret; it is the public recovery authority state your app needs later.
+
+## Recover
+
+```ts
+import { recoverGhost } from "@0xsarwagya/ghost";
+
+const ghost = await recoverGhost({
+  recoverySecret,
+  recoveryRecord,
+});
+```
+
+The recovered browser gets the same `ghost.id` and a fresh
+`ghost.credentialId`. Register the new credential in your server-side
+credential store before accepting proofs for Ghost-owned data.
+
+Recovery does not import the old private key, contact a Ghost service,
+send email, use OAuth, or silently back anything up. If the user loses the
+recovery secret, Ghost cannot recreate it.

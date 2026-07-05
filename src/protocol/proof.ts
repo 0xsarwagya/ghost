@@ -1,6 +1,11 @@
 import { GhostError, type GhostOperation } from "../errors.js";
 import { assertChallengeShape, type GhostChallenge } from "./challenge.js";
-import { ALGORITHM, GHOST_ID_PATTERN, PROTOCOL_VERSION } from "./constants.js";
+import {
+  ALGORITHM,
+  CREDENTIAL_ID_PATTERN,
+  GHOST_ID_PATTERN,
+  PROTOCOL_VERSION,
+} from "./constants.js";
 
 /**
  * A self-contained proof of possession. The public key travels with the
@@ -11,6 +16,7 @@ export interface GhostProof {
   version: 1;
   algorithm: "ed25519";
   ghostId: string;
+  credentialId: string;
   publicKey: string;
   challenge: GhostChallenge;
   signature: string;
@@ -50,6 +56,12 @@ export function assertProofShape(
   }
   if (typeof proof.ghostId !== "string" || !GHOST_ID_PATTERN.test(proof.ghostId)) {
     fail(operation, "proof.ghostId must be a well-formed ghost ID");
+  }
+  if (
+    typeof proof.credentialId !== "string" ||
+    !CREDENTIAL_ID_PATTERN.test(proof.credentialId)
+  ) {
+    fail(operation, "proof.credentialId must be a well-formed credential ID");
   }
   for (const field of ["publicKey", "signature"] as const) {
     if (typeof proof[field] !== "string" || proof[field].length === 0) {

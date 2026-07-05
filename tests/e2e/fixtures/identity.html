@@ -7,18 +7,41 @@
   <body>
     <pre id="log"></pre>
     <script type="module">
-      import { capabilities, createGhost, isGhostError } from "@0xsarwagya/ghost";
+      import {
+        capabilities,
+        createGhost,
+        isGhostError,
+        recoverGhost,
+      } from "@0xsarwagya/ghost";
 
       window.__capabilities = () => capabilities();
 
       window.__create = async () => {
         const ghost = await createGhost();
-        return { id: ghost.id, publicKey: ghost.publicKey };
+        return {
+          id: ghost.id,
+          credentialId: ghost.credentialId,
+          publicKey: ghost.publicKey,
+        };
       };
 
       window.__sign = async (challenge) => {
         const ghost = await createGhost();
         return ghost.sign(challenge);
+      };
+
+      window.__enableRecovery = async () => {
+        const ghost = await createGhost();
+        return ghost.enableRecovery();
+      };
+
+      window.__recover = async (recoverySecret, recoveryRecord) => {
+        const ghost = await recoverGhost({ recoverySecret, recoveryRecord });
+        return {
+          id: ghost.id,
+          credentialId: ghost.credentialId,
+          publicKey: ghost.publicKey,
+        };
       };
 
       window.__signError = async (challenge) => {
