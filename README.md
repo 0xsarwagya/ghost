@@ -81,6 +81,16 @@ const ghost = await recoverGhost({ recoverySecret, recoveryRecord });
 // Same ghost.id, fresh non-extractable credential.
 ```
 
+## Used in Local
+
+[Local](https://local.sarwagya.wtf) uses Ghost as the identity primitive
+between two chatting browsers. Each peer signs a nonce chosen by the
+other; the resulting proofs establish mutual identity before any message
+crosses the WebRTC data channel. The conversation history is pinned to
+the peer's Ghost ID.
+
+Source: [github.com/0xsarwagya/local](https://github.com/0xsarwagya/local)
+
 ## Status
 
 Experimental. The protocol is versioned and the v1 wire format is pinned by
